@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.apple-stock-tracker</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/usr/bin/caffeinate</string>
+		<string>-i</string>
+		<string>/usr/local/bin/python3</string>
+		<string>-u</string>
+		<string>/Users/YOUR_USERNAME/apple-iPhone-stock-tracker/apple_stock_tracker.py</string>
+	</array>
+	<key>WorkingDirectory</key>
+	<string>/Users/YOUR_USERNAME/apple-iPhone-stock-tracker</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>NTFY_TOPIC</key>
+		<string></string>
+	</dict>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>StandardOutPath</key>
+	<string>/Users/YOUR_USERNAME/apple_stock_tracker.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/YOUR_USERNAME/apple_stock_tracker.log</string>
+</dict>
+</plist>
