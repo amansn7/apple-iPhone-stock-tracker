@@ -6,8 +6,8 @@ moment any colour is available for pickup near a pincode.
 Pure Python standard library — nothing to `pip install`.
 
 ```
-=== 33137 @ 13:05:40 ===
-  *** IN STOCK *** Burgundy  The Galleria (Fort Lauderdale 33304) — Available Today
+=== 95014 @ 15:20:44 ===
+  *** IN STOCK *** Black     Union Square (San Francisco 94108) — Available Today
 ```
 
 On a hit it plays a sound, and (optionally) pushes to your Android phone via
@@ -24,7 +24,7 @@ PARTS = {                    # part number -> colour
     "MJW74LL/A": "Glacier",
     "MJW64LL/A": "Burgundy",
 }
-ZIPS = ["33137"]             # one or more pincodes
+ZIPS = ["95014", "33137"]    # one or more pincodes
 INTERVAL = (120, 180)        # seconds between checks (randomized)
 ```
 
@@ -56,6 +56,19 @@ The topic is a capability — anyone who knows it can push to you — so it is r
 from the environment and never committed. Leave it unset and push is simply off;
 the stock check still works.
 
+To route one pincode to a different topic (say, Miami alerts to a second phone),
+set `NTFY_TOPIC_<PINCODE>`; it overrides the base topic for that pincode only:
+
+```bash
+export NTFY_TOPIC="cupertino-topic"
+export NTFY_TOPIC_33137="miami-topic"
+python3 apple_stock_tracker.py --notify-test 33137   # buzzes the miami topic
+```
+
+Each pincode is alerted independently — a restock in 95014 only pushes to the
+base topic, and only re-arms that pincode, so one busy store never masks the
+other going quiet.
+
 ## Run at login (macOS launchd)
 
 Copy the plist and fix the two paths for your machine:
@@ -64,6 +77,20 @@ Copy the plist and fix the two paths for your machine:
 cp com.apple-stock-tracker.plist ~/Library/LaunchAgents/
 #   /Users/YOUR_USERNAME/... in ProgramArguments and StandardOutPath
 #   python3 path: /usr/local/bin/python3 (Intel) or /opt/homebrew/bin/python3 (Apple Silicon)
+```
+
+Fill in the `EnvironmentVariables` block with your topics — that is where they
+belong when the script runs under launchd, since there is no shell profile to
+export them:
+
+```xml
+<key>EnvironmentVariables</key>
+<dict>
+    <key>NTFY_TOPIC</key>
+    <string>base-topic-for-every-pincode</string>
+    <key>NTFY_TOPIC_33137</key>
+    <string>override-topic-for-this-pincode</string>
+</dict>
 ```
 
 Then load it:

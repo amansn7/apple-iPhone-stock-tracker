@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-iPhone 18 Pro Max 256GB stock tracker (any colour) for Miami pincode 33137.
+iPhone 18 Pro Max 256GB stock tracker (any colour) for pincodes 95014, 33137.
 
 Uses /shop/retail/pickup-message — the old /shop/fulfillment-messages endpoint
 is dead (HTTP 541). Lookup failures report UNKNOWN, never "out of stock".
@@ -28,7 +28,7 @@ PARTS = {
     "MJW74LL/A": "Glacier",
     "MJW64LL/A": "Burgundy",
 }
-ZIPS = ["33137"]  # Miami
+ZIPS = ["95014", "33137"]  # Cupertino, Miami
 # Apple rate-limits pickup queries per egress IP: ~30 requests triggers HTTP 541,
 # then a hard block for 10+ minutes. Randomize pacing; back off hard on 541.
 INTERVAL = (120, 180)      # normal pause range, seconds
@@ -42,9 +42,9 @@ URL = "https://www.apple.com/shop/retail/pickup-message"
 # Android push via ntfy.sh: install the "ntfy" app, subscribe to your own topic.
 # The topic is a capability — anyone who has it can push to your phone — so it
 # comes from the NTFY_TOPIC env var instead of the source. Empty = push disabled.
+# Set NTFY_TOPIC_<PINCODE> to route one pincode to a different topic.
 NTFY_TOPIC = os.environ.get("NTFY_TOPIC", "")
-NTFY_URL = f"https://ntfy.sh/{NTFY_TOPIC}"
-_notified = {"sent": False}
+_notified = {}  # pincode -> already pushed for this stock streak
 _blocked = {"hit": False, "streak": 0}  # 541 hits since the last normal response
 
 # Heartbeat: lets the auto-restarted instance detect and report a dead predecessor.
@@ -128,12 +128,18 @@ def alert():
     os.system("afplay /System/Library/Sounds/Glass.aiff >/dev/null 2>&1")
 
 
-def publish(body, title, priority="default"):
+def topic_for(zipcode):
+    """Per-pincode override (NTFY_TOPIC_33137) falling back to NTFY_TOPIC."""
+    return os.environ.get(f"NTFY_TOPIC_{zipcode}") or NTFY_TOPIC
+
+
+def publish(body, title, priority="default", zipcode=None):
     """Send an ntfy push. Returns True only if a push actually went out."""
-    if not NTFY_TOPIC:
+    topic = topic_for(zipcode)
+    if not topic:
         return False
     req = urllib.request.Request(
-        NTFY_URL, data=body.encode(),
+        f"https://ntfy.sh/{topic}", data=body.encode(),
         headers={"Title": title, "Priority": priority},
     )
     urllib.request.urlopen(req, timeout=10, context=CTX).read()
@@ -142,7 +148,7 @@ def publish(body, title, priority="default"):
 
 def run_once():
     found = unknown = out = 0
-    hits = []
+    hits = {}  # pincode -> ["colour — store (detail)", ...]
     ts = datetime.now().strftime("%H:%M:%S")
     for zipcode in ZIPS:
         rows = check_zip(zipcode)
@@ -150,7 +156,7 @@ def run_once():
         for name, colour, status, detail in rows:
             if status == "IN STOCK":
                 found += 1
-                hits.append(f"{zipcode}: {colour} — {name} ({detail})")
+                hits.setdefault(zipcode, []).append(f"{colour} — {name} ({detail})")
                 print(f"  *** IN STOCK *** {colour:9} {name} — {detail}")
             elif status == "unknown":
                 unknown += 1
@@ -160,17 +166,22 @@ def run_once():
     if found:
         print(f"\nSTOCK FOUND: {found} pickup option(s)")
         alert()
-        if not _notified["sent"]:
-            try:
-                sent = publish("iPhone 18 Pro Max 256GB AVAILABLE\n" + "\n".join(hits[:10]),
-                               "iPhone 18 Pro Max IN STOCK", priority="urgent")
-                _notified["sent"] = sent
-                print("pushed to Android via ntfy" if sent
-                      else "ntfy push disabled — set NTFY_TOPIC to enable")
-            except (urllib.error.URLError, TimeoutError) as e:
-                print(f"!! ntfy push failed: {e}")
-    else:
-        _notified["sent"] = False  # re-arm so a fresh restock notifies again
+    for zipcode in ZIPS:
+        lines = hits.get(zipcode)
+        if not lines:
+            _notified.pop(zipcode, None)  # re-arm so a fresh restock notifies again
+            continue
+        if _notified.get(zipcode):
+            continue
+        try:
+            sent = publish("iPhone 18 Pro Max 256GB AVAILABLE\n" + "\n".join(lines[:10]),
+                           "iPhone 18 Pro Max IN STOCK", priority="urgent", zipcode=zipcode)
+            _notified[zipcode] = sent
+            print(f"pushed {zipcode} -> ntfy/{topic_for(zipcode)}" if sent
+                  else f"{zipcode}: ntfy push disabled — set NTFY_TOPIC[_{zipcode}] to enable")
+        except (urllib.error.URLError, TimeoutError) as e:
+            print(f"!! ntfy push failed for {zipcode}: {e}")
+    if not found:
         if unknown:
             print(f"\n{out} store/colour checks: out of stock; {unknown} lookup(s) FAILED "
                   f"— not a confirmed no-stock")
@@ -197,6 +208,16 @@ def selftest():
     assert COOLDOWN[0] <= backoff(1) <= COOLDOWN[1], backoff(1)   # clears Apple's ~14 min block
     assert backoff(2) >= 2 * COOLDOWN[0], backoff(2)              # consecutive hits double
     assert backoff(5) == MAX_COOLDOWN, backoff(5)                 # and then just cap
+    saved = dict(os.environ)
+    try:
+        os.environ["NTFY_TOPIC_33137"] = "miami"
+        assert topic_for("33137") == "miami", topic_for("33137")  # pincode override wins
+        del os.environ["NTFY_TOPIC_33137"]
+        assert topic_for("95014") == NTFY_TOPIC, topic_for("95014")  # falls back
+        assert topic_for(None) == NTFY_TOPIC, topic_for(None)        # no pincode -> base
+    finally:
+        os.environ.clear()
+        os.environ.update(saved)
     print("selftest ok")
 
 
@@ -204,17 +225,21 @@ def main():
     if "--selftest" in sys.argv:
         return selftest()
     if "--notify-test" in sys.argv:
-        if publish("Test alert — setup works.", "apple_stock_tracker test", priority="high"):
-            print(f"test push sent — check your ntfy app (topic: {NTFY_TOPIC})")
+        i = sys.argv.index("--notify-test")
+        zipcode = (sys.argv[i + 1] if i + 1 < len(sys.argv)
+                   and not sys.argv[i + 1].startswith("--") else None)
+        if publish("Test alert — setup works.", "apple_stock_tracker test",
+                   priority="high", zipcode=zipcode):
+            print(f"test push sent — topic: {topic_for(zipcode)}")
         else:
             print("ntfy push disabled — set the NTFY_TOPIC env var to enable")
         return
     print(f"Tracking iPhone 18 Pro Max 256GB — {', '.join(PARTS.values())}")
     print(f"Pincodes: {', '.join(ZIPS)} | interval {INTERVAL[0]}-{INTERVAL[1]}s | Ctrl+C to stop")
-    if NTFY_TOPIC:
-        print(f'Android push: ntfy app, subscribe to topic "{NTFY_TOPIC}"')
-    else:
-        print("Android push: disabled (NTFY_TOPIC not set)")
+    for zipcode in ZIPS:
+        topic = topic_for(zipcode)
+        print(f"Android push: {zipcode} -> ntfy/{topic}" if topic
+              else f"Android push: {zipcode} disabled (NTFY_TOPIC[_{zipcode}] not set)")
 
     if "--once" in sys.argv:
         run_once()

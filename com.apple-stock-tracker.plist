@@ -18,6 +18,8 @@
 	<dict>
 		<key>NTFY_TOPIC</key>
 		<string></string>
+		<key>NTFY_TOPIC_33137</key>
+		<string></string>
 	</dict>
 	<key>RunAtLoad</key>
 	<true/>
